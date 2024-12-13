@@ -1,0 +1,74 @@
+Align the reads
+
+bowtie2 -p 23  -x ~/reference/KN9204/KN9204index_withoutpre/KN9204 -1 kn.r1.fastq.gz -2 kn.r2.fastq.gz --very-sensitive --no-mixed --no-discordant 2> kn.wheat.sensitive.bowtie2.log | samtools view -bS -q 20 | samtools sort - | samtools rmdup -s - kn.wheat.sens.bam
+
+bwa mem -M -t 4 ~/reference/tair10/bwa_index/TAIR10 ../cleandata/ATAC-1h.r1.fq.gz ../cleandata/ATAC-1h.r2.fq.gz | samtools view -bS -q 30 | samtools sort - -o ATAC-1h.1.bam
+Bam filter
+
+sambamba markdup -r -t 20 ATAC-1h.1.bam ATAC-1h.rmdup.bam
+samtools view -h -b -F 1804 -f 2 -q 30 ATAC-1h.rmdup.bam > ATAC-1h.final.bam
+samtools index ATAC-1h.final.bam
+Fragement size
+
+samtools view ATAC-1h.final.bam | awk '$9>0' | cut -f 9 |sort | uniq -c | sort -b -k2,2n | sed -e 's/^[ \t]*//' > ATAC-1h.frag.stat
+
+p1<-ggplot(aa)+
+    geom_line(aes(x=V2,y=V1))+
+    theme_bw(base_size=20)+
+    labs(x="Fragment Length",y="Count")+
+    coord_cartesian(xlim=c(0,1000))
+peak calling
+
+macs2 callpeak --call-summits -c T16.ipt.bam -t T16.bam -q 0.01 -f BAMPE -g 120000000 -n T16_FIE 2> T16_FIE.macs2.log
+FRiP
+
+featureCounts -p -a L0.saf -F SAF -o L0.txt ATAC-Dark.final.bam
+visulization
+
+bamCoverage -bs 100 --effectiveGenomeSize 17000000000 --normalizeUsing RPKM -b x.bam -o x.bw --smoothLength 500
+
+computeMatrix scale-regions -p 40 -R /home/long/reference/KN9204/1928/hc_deeptools.bed -S x.bw -b 1000 -a 1000 --regionBodyLength 2000 -bs 100 --skipZeros -o heatmap.gz
+plotProfile -m matrix.mat.gz -out wheat.profile.png
+
+'''
+chr1    11649   13714   .       .       -
+chr1    52239   54692   .       .       +
+chr1    57269   59167   .       .       -
+'''
+
+computeMatrix reference-point --referencePoint TSS -p 40 -R /home/long/reference/KN9204/1928/hc_deeptools.bed -S D0.bw -b 2000 -a 2000  -bs 100 --skipZeros -o nom.gz
+
+computeMatrix reference-point --referencePoint center -b 3000 -a 3000 --sortRegions descend --sortUsing  max --sortUsingSamples 1 --averageTypeBins max --missingDataAsZero  --skipZeros -p 40 -R fie.bed -S FIE0h.bw FIE0.5h.bw FIE4h.bw -o nom.gz
+
+plotHeatmap -m nom.gz -out heatmap.png --dpi 600  --colorList 'white,orange' 'white,red' 'white,blue' --heatmapHeight 20  --heatmapWidth 4 --zMin 0 0 0 --zMax 50 50 50
+
+plotProfile -m matrix.mat.gz -out wheat.profile.png --perGroup
+peak Annotation
+
+R
+library(ChIPseeker)
+library("TxDb.Athaliana.BioMart.plantsmart28")
+txdb=TxDb.Athaliana.BioMart.plantsmart28
+library(org.Atair10.eg.db)
+library(ggplot2)
+
+gPIR=readPeakFile("gPIR_i_peaks.narrowPeak",head=F)
+pir=readPeakFile("pir_i_peaks.narrowPeak",head=F)
+col=readPeakFile("col_i_peaks.narrowPeak",head=F)
+peak=list(gPIR=gPIR,pir=pir,col=cok)
+
+bb=annotatePeak(aa,tssRegion=c(-1500,500),TxDb=txdb,level="gene",assignGenomicAnnotation=T,genomicAnnotationPriority=c("Promoter","Exon","Intron","5UTR","3UTR","Downstream","Intergenic"),annoDb=org.Atair10.eg.db,addFlankGeneInfo=T,flankDistance=500,overlap="all")
+
+peakAnnoList <-lapply(peak,annotatePeak,tssRegion=c(-1500,500),TxDb=txdb,level="gene",assignGenomicAnnotation=T,genomicAnnotationPriority=c("Promoter","Exon","Intron","5UTR","3UTR","Downstream","Intergenic"),annoDb=org.Atair10.eg.db,addFlankGeneInfo=T,flankDistance=500,overlap="all")
+
+promoter=getPromoters(TxDb=txdb,upstream=1000,downstream=1000)
+
+tagMatrix=getTagMatrix(gPIR,windows=promoter)
+
+tagMatrixList=lapply(peak,getTagMatrix,windows=promoter)
+
+plotAvgProf(tagMatrixList,xlim=c(-1000,1000),conf=0.95,resample=500)+scale_color_brewer(palette ="Set1")
+
+plotAnnoPie(bb)
+plotAnnoBar(peakAnnoList)
+plotDistToTSS(peakAnnoList)
