@@ -1,0 +1,13 @@
+fastp -i ./rawdata/RNA_CIM0d_Rep1_R1.fq.gz -I ./rawdata/RNA_CIM0d_Rep1_R2.fq.gz -o ./cleandata/clean.RNA_CIM0d_Rep1_R1.fq.gz -O ./cleandata/clean.RNA_CIM0d_Rep1_R2.fq.gz --detect_adapter_for_pe -w 4 --compression 9 -h ./cleandata/RNA_CIM0d_Rep1.html -j ./cleandata/RNA_CIM0d_Rep1.json
+hisat2 --dta -x ~/genome/tair10/hisat2.index/tair10.hisat2 -p 4 -1 ./cleandata/clean.RNA_CIM0d_Rep1_R1.fq.gz -2 ./cleandata/clean.RNA_CIM0d_Rep1_R2.fq.gz -S ./hisat2/RNA_CIM0d_Rep1.sam samtools view -@ 4 -bS ./hisat2/RNA_CIM0d_Rep1.sam | samtools sort -@ 4 - -o ./hisat2/RNA_CIM0d_Rep1.bam
+featureCounts -T 4 -t exon -p -P -B -C -g gene_id -a ~/genome/tair10/Arabidopsis_thaliana.TAIR10.53.gtf -o ./featureCount/RNA_CIM0d_Rep1.feacount.txt ./hisat2/RNA_CIM0d_Rep1.bam
+Rscript ~/software/FeatureCount_out2rawCoun_TPM.R in.txt sample.txt TPM all.count.txt all.TPM.txt
+#差异分析
+library(DESeq2)
+count=read.table("all.count.txt",row.names=1,header=T)
+group=read.table("group.txt",header=T)
+dds=DESeqDataSetFromMatrix(countData=count,colData=group,design= ~ group)
+dds$group=factor(dds$group,levels=c("CIM0d","CIM3d"))
+deg=DESeq(dds)
+res=results(deg)
+write.table(res,"CIM0d.CIM3d.deg.txt",quote=F,sep="\t")
